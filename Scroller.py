@@ -319,6 +319,7 @@ while run:
     player.move(moving_left, moving_right)
 
     for enemy in enemy_group:
+        enemy.ai()
         enemy.update()
         enemy.draw()
 
