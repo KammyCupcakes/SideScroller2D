@@ -152,7 +152,15 @@ class Knight(pygame.sprite.Sprite):
 
 
 
-    def
+    def ai(self):
+        if self.alive and player.alive:
+            # handles the logic of the ai
+            if self.direction == 1:
+                ai_moving_right = True
+            else:
+                ai_moving_right = False
+            ai_moving_left = not ai_moving_right
+            self.move(ai_moving_left, ai_moving_right)
 
     def update_animation(self):
         # update animation
