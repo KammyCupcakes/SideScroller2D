@@ -17,7 +17,7 @@ FPS = 60
 
 # define game variables
 GRAVITY = 0.75
-SCROLL_THRESH = 25
+SCROLL_THRESH = 1000
 ROWS = 16
 COLS = 150
 TILE_SIZE = HEIGHT // ROWS
@@ -325,10 +325,10 @@ class World():
                         item_box = ItemBox('Sword', x * TILE_SIZE, y * TILE_SIZE)
                         item_box_group.add(item_box)
                         pass # empty
-                    elif tile == 19: # create health box
+                    elif tile == 18: # create health box
                         item_box = ItemBox('Health', x * TILE_SIZE, y * TILE_SIZE)
                         item_box_group.add(item_box)
-                    elif tile == 20: # create exit
+                    elif tile == 19: # create exit
                         exit = Exit(img, x * TILE_SIZE, y * TILE_SIZE)
                         exit_group.add(exit)
 

@@ -1,5 +1,7 @@
 import pygame
 import os
+import random
+import csv
 
 pygame.init()
 
@@ -15,7 +17,15 @@ FPS = 60
 
 # define game variables
 GRAVITY = 0.75
-TILE_SIZE = 40
+SCROLL_THRESH = 25
+ROWS = 16
+COLS = 150
+TILE_SIZE = HEIGHT // ROWS
+TILE_TYPES = 21
+screen_scroll = 0
+bg_scroll = 0
+
+level = 0
 
 # define player action variables
 moving_left = False
@@ -23,16 +33,27 @@ moving_right = False
 attack = False
 
 # load images
+pine1_img = pygame.image.load('img/Background/pine1.png').convert_alpha()
+pine2_img = pygame.image.load('img/Background/pine2.png').convert_alpha()
+mountain_img = pygame.image.load('img/Background/mountain.png').convert_alpha()
+sky_img = pygame.image.load('img/Background/sky_cloud.png').convert_alpha()
+
+# store tiles in a list
+img_list = []
+for x in range(TILE_TYPES):
+    img = pygame.image.load(f'img/Tile/{x}.png')
+    img = pygame.transform.scale(img, (TILE_SIZE, TILE_SIZE))
+    img_list.append(img)
+
 # slash
 slash_img = pygame.image.load('PlayerModel/Slash/0.png').convert_alpha()
-#pick up boxes
+# pick up boxes
 heal_box_img = pygame.image.load('Items/health_box.png').convert_alpha()
 sword_box = pygame.image.load('Items/sword_box.png').convert_alpha()
 item_boxes = {
-    'Health'    : heal_box_img,
-    'Sword'     : sword_box
+    'Health': heal_box_img,
+    'Sword': sword_box
 }
-
 
 # defining colors
 
@@ -50,9 +71,15 @@ def draw_text(text, font, text_color, x, y):
     img = font.render(text, True, text_color)
     screen.blit(img, (x, y))
 
+
 def draw_bg():
     screen.fill(BG)
-    pygame.draw.line(screen, RED, (0, 300), (WIDTH, 300))
+    screen.blit(sky_img, (0, 0))
+    screen.blit(mountain_img, (0, HEIGHT - mountain_img.get_height() - 300))
+    screen.blit(pine1_img, (0, HEIGHT - pine1_img.get_height() - 150))
+    screen.blit(pine2_img, (0, HEIGHT - pine2_img.get_height()))
+    # temp floor
+    # pygame.draw.line(screen, RED, (0, 300), (WIDTH, 300))
 
 
 class Knight(pygame.sprite.Sprite):
@@ -75,6 +102,12 @@ class Knight(pygame.sprite.Sprite):
         self.frame_index = 0
         self.action = 0
         self.update_time = pygame.time.get_ticks()
+        # create ai specific variables
+        self.move_counter = 0
+        # allows the ai to find player
+        self.vision = pygame.Rect(0, 0, 150, 20)
+        self.idling = False
+        self.idling_counter = 0
 
         # load all images for the players
 
@@ -97,6 +130,8 @@ class Knight(pygame.sprite.Sprite):
         # tells where the rect will be
         self.rect.center = (x, y)
 
+        self.width = self.image.get_width()
+        self.height = self.image.get_height()
 
     def update(self):
         self.update_animation()
@@ -105,9 +140,9 @@ class Knight(pygame.sprite.Sprite):
         if self.attack_cooldown > 0:
             self.attack_cooldown -= 1
 
-
     def move(self, moving_left, moving_right):
         # reset movement movement variables
+        screen_scroll = 0
         dx = 0
         dy = 0
 
@@ -133,34 +168,90 @@ class Knight(pygame.sprite.Sprite):
             self.vel_y
         dy += self.vel_y
 
-        # check collision with floor
-        if self.rect.bottom + dy > 300:
-            dy = 300 - self.rect.bottom
-            self.in_air = False
+        # check for collision
+        for tile in world.obstacle_list:
+        # look for collision before collision happens
+        # collision for the x direction
+            if tile[1].colliderect(self.rect.x + dx, self.rect.y, self.width, self.height):
+                dx = 0
+
+
+        # collision for the y direction
+            if tile[1].colliderect(self.rect.x, self.rect.y + dy, self.width, self.height):
+                # check if below the ground, i.e. jumping
+                if self.vel_y < 0:
+                    self.vel_y = 0
+                    dy = tile[1].bottom - self.rect.top
+                # check if above the ground i.e. falling
+                elif self.vel_y >= 0:
+                    self.vel_y = 0
+                    self.in_air = False
+                    dy = tile[1].top - self.rect.bottom
+
 
         # update rectangle position
         self.rect.x += dx
         self.rect.y += dy
 
+        # update scroll based on player position
+        if self.char_type == 'player':
+            if self.rect.right > WIDTH - SCROLL_THRESH or self.rect.left < SCROLL_THRESH:
+                self.rect.x -= dx
+                screen_scroll = -dx
+
+        return screen_scroll
+
     def attack(self):
         if self.attack_cooldown == 0 and self.ammo > 0:
             self.attack_cooldown = 20
-            slash = Slash(self.rect.centerx + (0.8 * self.rect.size[0] * self.direction), self.rect.centery, self.direction)
+            # possible bug with hitbox when scaling character
+            slash = Slash(self.rect.centerx + (1 * self.rect.size[0] * self.direction), self.rect.centery,
+                          self.direction)
             slash_group.add(slash)
             # reduce ammo
             self.ammo -= 1
 
-
-
     def ai(self):
         if self.alive and player.alive:
-            # handles the logic of the ai
-            if self.direction == 1:
-                ai_moving_right = True
+            # allows a random chance for the enemy to stop moving
+            if self.idling == False and random.randint(1, 200) == 1:
+                self.update_action(0)  # 0 : idle
+                self.idling = True
+                # count down
+                self.idling_counter = 50
+            # check if the ai is near the player
+            if self.vision.colliderect(player.rect):
+                # stop running and face the player
+                self.update_action(0)  # 0: idle
+                # shoot
+                self.attack()
+
+            if self.idling == False:
+                # handles the logic of the ai
+                if self.direction == 1:
+                    ai_moving_right = True
+                else:
+                    ai_moving_right = False
+                ai_moving_left = not ai_moving_right
+                self.move(ai_moving_left, ai_moving_right)
+                self.update_action(1)  # 1: RUN
+                self.move_counter += 1
+                # update ai vision as the enemy moves
+                self.vision.center = (self.rect.centerx + 75 * self.direction, self.rect.centery)
+                # shows the vision hitbox
+                pygame.draw.rect(screen, GREEN, self.vision)
+
+
+                # allows enemy to walk a certain distance then flip them back around
+                if self.move_counter > TILE_SIZE:
+                    self.direction *= -1
+                    self.move_counter *= -1
+
             else:
-                ai_moving_right = False
-            ai_moving_left = not ai_moving_right
-            self.move(ai_moving_left, ai_moving_right)
+                self.idling_counter -= 1
+                if self.idling_counter <= 0:
+                    self.idling = False
+
 
     def update_animation(self):
         # update animation
@@ -187,7 +278,6 @@ class Knight(pygame.sprite.Sprite):
             self.frame_index = 0
             self.update_time = pygame.time.get_ticks()
 
-
     def check_alive(self):
         if self.health <= 0:
             self.health = 0
@@ -200,6 +290,80 @@ class Knight(pygame.sprite.Sprite):
 
         # shows the hitbox of the players
         # pygame.draw.rect(screen, RED, self.rect, 1)
+
+class World():
+    def __init__(self):
+        self.obstacle_list = []
+
+    def process_data(self, data):
+        # iterate through each value in level data file
+        for y, row in enumerate(data):
+            for x, tile in enumerate(row):
+                if tile >= 0:
+                    img = img_list[tile]
+                    img_rect = img.get_rect()
+                    img_rect.x = x * TILE_SIZE
+                    img_rect.y = y * TILE_SIZE
+                    tile_data = (img, img_rect)
+                    if tile >= 0 and tile <= 8:
+                        self.obstacle_list.append(tile_data)
+                    elif tile >= 9 and tile <= 10:
+                        water = Water(img, x * TILE_SIZE, y* TILE_SIZE)
+                        water_group.add(water)
+                    elif tile >= 11 and tile <= 14:
+                        decoration = Decoration(img, x * TILE_SIZE, y* TILE_SIZE)
+                        decoration_group.add(decoration)
+                    elif tile == 15: # creating player
+
+                        player = Knight('PlayerModel', x * TILE_SIZE, y * TILE_SIZE, 1.65, 2, 20)
+                        health_bar = HealthBar(10, 10, player.health, player.health)
+
+                    elif tile == 16: # create enemies
+                        enemy = Knight('EnemyModel', x * TILE_SIZE, y * TILE_SIZE, 1.65, 2, 20)
+                        enemy_group.add(enemy)
+                    elif tile == 17: # create ammo box
+                        item_box = ItemBox('Sword', x * TILE_SIZE, y * TILE_SIZE)
+                        item_box_group.add(item_box)
+                        pass # empty
+                    elif tile == 19: # create health box
+                        item_box = ItemBox('Health', x * TILE_SIZE, y * TILE_SIZE)
+                        item_box_group.add(item_box)
+                    elif tile == 20: # create exit
+                        exit = Exit(img, x * TILE_SIZE, y * TILE_SIZE)
+                        exit_group.add(exit)
+
+
+        return player, health_bar
+
+
+    def draw(self):
+        for tile in self.obstacle_list:
+            tile[1][0] += screen_scroll
+            screen.blit(tile[0], tile[1])
+
+
+
+class Decoration(pygame.sprite.Sprite):
+    def __init__(self, img, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = img
+        self.rect = self.image.get_rect()
+        self.rect.midtop = (x + TILE_SIZE // 2, y + (TILE_SIZE - self.image.get_height()))
+
+class Water(pygame.sprite.Sprite):
+    def __init__(self, img, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = img
+        self.rect = self.image.get_rect()
+        self.rect.midtop = (x + TILE_SIZE // 2, y + (TILE_SIZE - self.image.get_height()))
+
+class Exit(pygame.sprite.Sprite):
+    def __init__(self, img, x, y):
+        pygame.sprite.Sprite.__init__(self)
+        self.image = img
+        self.rect = self.image.get_rect()
+        self.rect.midtop = (x + TILE_SIZE // 2, y + (TILE_TYPES - self.image.get_height()))
+
 
 class ItemBox(pygame.sprite.Sprite):
     def __init__(self, item_type, x, y):
@@ -241,6 +405,7 @@ class HealthBar():
         pygame.draw.rect(screen, RED, (self.x, self.y, 150, 20))
         pygame.draw.rect(screen, GREEN, (self.x, self.y, 150 * ratio, 20))
 
+
 class Slash(pygame.sprite.Sprite):
     def __init__(self, x, y, direction):
         pygame.sprite.Sprite.__init__(self)
@@ -257,6 +422,11 @@ class Slash(pygame.sprite.Sprite):
         if self.rect.right < 0 or self.rect.left > WIDTH:
             self.kill()
 
+        # check for collision with level
+        for tile in world.obstacle_list:
+            if tile[1].colliderect(self.rect):
+                self.kill()
+
         # check collision with characters
         if pygame.sprite.spritecollide(player, slash_group, False):
             if player.alive:
@@ -271,30 +441,30 @@ class Slash(pygame.sprite.Sprite):
                     self.kill()
 
 
-
-
 # create sprite groups
 slash_group = pygame.sprite.Group()
 enemy_group = pygame.sprite.Group()
 item_box_group = pygame.sprite.Group()
 
+decoration_group = pygame.sprite.Group()
+water_group = pygame.sprite.Group()
+exit_group = pygame.sprite.Group()
 
 
-# temp - create item boxes
-item_box = ItemBox('Health', 100, 250)
-item_box_group.add(item_box)
-item_box = ItemBox('Sword', 400, 250)
-item_box_group.add(item_box)
+# create empty tile list
+world_data = []
+for row in range(ROWS):
+    r = [-1] * COLS
+    world_data.append(r)
+# load in level data and create world/level
+with open(f'level{level}_data.csv', newline='') as csvfile:
+    reader = csv.reader(csvfile, delimiter=',')
+    for x, row in enumerate(reader):
+        for y, tile in enumerate(row):
+            world_data[x][y] = int(tile)
 
-# creates the instance of the player
-player = Knight('PlayerModel', 200, 200, 1.65, 2, 20)
-health_bar = HealthBar(10, 10, player.health, player.health)
-
-
-enemy = Knight('EnemyModel', 400, 200, 1.65, 2, 20)
-enemy2 = Knight('EnemyModel', 500, 300, 1.65, 2, 20)
-enemy_group.add(enemy)
-enemy_group.add(enemy2)
+world = World()
+player, health_bar = world.process_data(world_data)
 
 
 run = True
@@ -302,7 +472,12 @@ while run:
 
     clock.tick(FPS)
 
+    # update background
     draw_bg()
+
+    # draw world
+    world.draw()
+
     # show player health
     health_bar.draw(player.health)
     # show ammo
@@ -325,9 +500,15 @@ while run:
 
     slash_group.update()
     item_box_group.update()
+    decoration_group.update()
+    water_group.update()
+    exit_group.update()
 
     slash_group.draw(screen)
     item_box_group.draw(screen)
+    decoration_group.draw(screen)
+    water_group.draw(screen)
+    exit_group.draw(screen)
 
     # update player actions
     if player.alive:
@@ -340,7 +521,9 @@ while run:
             player.update_action(1)  # 1: RUN
         else:
             player.update_action(0)  # 0: Idle
-        player.move(moving_left, moving_right)
+        screen_scroll = player.move(moving_left, moving_right)
+
+        print(screen_scroll)
 
     for event in pygame.event.get():
         # to close game
@@ -376,3 +559,4 @@ while run:
     pygame.display.update()
 
 pygame.quit()
+
